@@ -1,1 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic Voice Assistant</title>
+</head>
+<body>
+  <h2>🎙️ Agentic Voice Assistant</h2>
+  <button onclick="startListening()">🎤 Speak</button>
+  <input id="user-input" type="text" placeholder="Type your message here...">
+  <button onclick="sendMessage()">Send</button>
+  <p><strong>You said:</strong> <span id="transcript"></span></p>
+  <h3>Conversation:</h3>
+  <div id="conversation"></div>
+  <h3>Response:</h3>
+  <div id="response"></div>
+  <div id="map-container"></div>
+
+  <script>
+    let conversationState = null;
+    let conversationHistory = [];
+
+    function updateConversationDisplay() {
+      const convDiv = document.getElementById("conversation");
+      convDiv.innerHTML = "";
+      if (conversationState && conversationState.history) {
+        conversationState.history.forEach(turn => {
+          const p = document.createElement("p");
+          p.innerHTML = `<b>${turn.role === 'user' ? 'You' : 'Assistant'}:</b> ${turn.text}`;
+          convDiv.appendChild(p);
+        });
+      }
+    }
+
+    function startListening() {
+      const recognition = new webkitSpeechRecognition();
+      recognition.lang = 'hi-IN';  // Hindi
+      recognition.start();
+
+      recognition.onresult = function(event) {
+        const spokenText = event.results[0][0].transcript;
+        document.getElementById("transcript").innerText = spokenText;
+        sendMessage(spokenText);
+      };
+    }
+
+    function sendMessage(text) {
+      const userInput = text || document.getElementById('user-input').value;
+      if (!userInput) return;
+      fetch('/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: userInput, state: conversationState })
+      })
+      .then(res => res.json())
+      .then(data => {
+        renderResponse(data.reply);
+        speak(data.reply, data.lang);
+        conversationState = data.state;
+        updateConversationDisplay();
+        document.getElementById('user-input').value = '';
+      });
+    }
+
+    // Render markdown links as HTML and embed OSM map if navigation link is present
+    function renderResponse(reply) {
+      const responseDiv = document.getElementById("response");
+      const mapDiv = document.getElementById("map-container");
+      mapDiv.innerHTML = '';
+      // Convert markdown links to HTML links
+      let html = reply.replace(/\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+      // Also handle the arrow (→) and list formatting
+      html = html.replace(/\n- /g, '<br>- ');
+      html = html.replace(/\n/g, '<br>');
+      responseDiv.innerHTML = html;
+
+      // Try to extract the first OSM navigation link and embed a map
+      const navLinkMatch = html.match(/href=\"(https:\/\/www.openstreetmap.org\/[^"]+)\"/);
+      if (navLinkMatch) {
+        // If it's a marker link, extract lat/lon for iframe
+        const markerMatch = navLinkMatch[1].match(/mlat=([\d.]+)&mlon=([\d.]+)/);
+        if (markerMatch) {
+          const lat = markerMatch[1];
+          const lon = markerMatch[2];
+          mapDiv.innerHTML = `<iframe width="100%" height="350" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="https://www.openstreetmap.org/export/embed.html?bbox=${lon-0.01},${lat-0.01},${lon+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lon}"></iframe>`;
+        } else {
+          // If it's a directions link, just provide the link (already rendered)
+        }
+      }
+    }
+
+    function mapLangCode(lang) {
+      if (lang === 'hi') return 'hi-IN';
+      if (lang === 'en') return 'en-US';
+      // Add more mappings as needed
+      return lang || 'hi-IN';
+    }
+
+    function speak(text, lang) {
+      // Sanitize text for TTS (replace degree symbol)
+      text = text.replace(/°C/g, ' डिग्री सेल्सियस').replace(/°/g, ' डिग्री');
+      const voices = window.speechSynthesis.getVoices();
+      // Try to find an exact match for the language
+      let voice = voices.find(v => v.lang === lang);
+      // If not found, try to find a voice that starts with the language code (e.g., 'hi' for 'hi-IN')
+      if (!voice && lang) {
+        voice = voices.find(v => v.lang && v.lang.startsWith(lang.split('-')[0]));
+      }
+      // Fallback to default
+      if (!voice) {
+        voice = voices[0];
+      }
+      const utterance = new SpeechSynthesisUtterance(text);
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      } else if (lang) {
+        utterance.lang = lang;
+      }
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // Ensure voices are loaded before first use
+    window.speechSynthesis.onvoiceschanged = () => {};
+
+    // Auto-trigger AC logic on page load
+    window.onload = function() {
+      fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: '', state: null })
+      })
+      .then(res => res.json())
+      .then(data => {
+        renderResponse(data.reply);
+        speak(data.reply, data.lang);
+        conversationState = data.state;
+        updateConversationDisplay();
+      });
+    };
+  </script>
+</body>
+</html>
 
